@@ -1,9 +1,13 @@
 package main
 
 import (
-	"github.com/go-redis/redis"
+	"fmt"
 	"log"
 	"net/http"
+
+	"database/sql"
+	"github.com/go-redis/redis"
+	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
@@ -15,16 +19,18 @@ const (
 	redisDB       = 1
 	sidKey        = "else.sid"
 
-	mysqlAddr = "127.0.0.1:3306"
+	mysqldns = "root:ipassword@tcp(localhost:3306)/hello"
 )
 
 var (
 	redisClient *redis.Client
+	mysqlDB     *sql.DB
 )
 
 // 完成redis与mysql连接的初始化
 func init() {
 	redisClient = defaultRedisClient()
+	mysqlDB = defaultMysqlDB()
 }
 
 // ------------------
@@ -32,6 +38,7 @@ func init() {
 // ------------------
 
 func main() {
+	defer closeDefaultMysqlDB()
 	// 实例化一个Echo类型
 	e := echo.New()
 	// 添加中间件
@@ -58,6 +65,24 @@ func defaultRedisClient() *redis.Client {
 	return client
 }
 
+func defaultMysqlDB() *sql.DB {
+	db, err := sql.Open("mysql", mysqldns)
+	if err != nil {
+		log.Println("err: sql.Open('sql', %q), %s", mysqldns, err)
+	}
+
+	err = db.Ping()
+	if err != nil {
+		log.Println("err: db.Ping(), %s", err)
+	}
+	log.Printf("mysqlDB connected...")
+	return db
+}
+
+func closeDefaultMysqlDB() {
+	mysqlDB.Close()
+}
+
 // --------------------
 // ----- handler ------
 // --------------------
@@ -67,7 +92,16 @@ func helloredis(c echo.Context) error {
 }
 
 func hellomysql(c echo.Context) error {
-	return c.JSON(http.StatusOK, "Hello mysql")
+	var (
+		name, salary string
+		age          int
+	)
+	row := mysqlDB.QueryRow("select name, salary, age from employees limit 1")
+	err := row.Scan(&name, &salary, &age)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, fmt.Sprintf("Hello mysql: row(name: %s, salary: %s, age: %d)", name, salary, age))
 }
 
 // --------------------
