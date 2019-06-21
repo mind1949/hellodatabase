@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 
@@ -11,6 +10,7 @@ import (
 
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
+	"github.com/yb7/echoswg"
 )
 
 const (
@@ -45,9 +45,34 @@ func main() {
 	e.Use(middleware.Logger())
 	// 添加路由
 	e.GET("/helloredis", helloredis, middlewareValidateSession())
-	e.GET("/hellomysql", hellomysql)
+	g := echoswg.NewApiGroup(e, "", "")
+	g.GET("hellomysql", hellomysql)
 	// 启动服务器
 	e.Logger.Fatal(e.Start(":1323"))
+}
+
+// --------------------
+// ---- middleware ----
+// --------------------
+
+// 中间件: 进行session验证
+func middlewareValidateSession() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// 尝试获取session id
+			sidCookie, err := c.Cookie(sidKey)
+			if err != nil {
+				return c.JSON(http.StatusForbidden, "no session id in cookie !")
+			}
+			// 尝试获取session
+			session, err := redisClient.Do("Get", sidCookie.Value).String()
+			if err != nil {
+				log.Printf("err: redisClient.Do(%v) session=%q err=%v \n", sidCookie.Value, session, err)
+				return c.JSON(http.StatusForbidden, "session verification failed !")
+			}
+			return next(c)
+		}
+	}
 }
 
 // --------------------
@@ -91,39 +116,22 @@ func helloredis(c echo.Context) error {
 	return c.JSON(http.StatusOK, "Hello, redis")
 }
 
-func hellomysql(c echo.Context) error {
-	var (
-		name, salary string
-		age          int
-	)
-	row := mysqlDB.QueryRow("select name, salary, age from employees limit 1")
-	err := row.Scan(&name, &salary, &age)
+func hellomysql() (*User, error) {
+	user := new(User)
+	row := mysqlDB.QueryRow("select name, mail, balance from users limit 1")
+	err := row.Scan(&user.Name, &user.Mail, &user.Balance)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return c.JSON(http.StatusOK, fmt.Sprintf("Hello mysql: row(name: %s, salary: %s, age: %d)", name, salary, age))
+	return user, nil
 }
 
 // --------------------
-// ---- middleware ----
+// ------ models ------
 // --------------------
 
-// 中间件: 进行session验证
-func middlewareValidateSession() echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			// 尝试获取session id
-			sidCookie, err := c.Cookie(sidKey)
-			if err != nil {
-				return c.JSON(http.StatusForbidden, "no session id in cookie !")
-			}
-			// 尝试获取session
-			session, err := redisClient.Do("Get", sidCookie.Value).String()
-			if err != nil {
-				log.Printf("err: redisClient.Do(%v) session=%q err=%v \n", sidCookie.Value, session, err)
-				return c.JSON(http.StatusForbidden, "session verification failed !")
-			}
-			return next(c)
-		}
-	}
+type User struct {
+	Name    string `json:"name"`
+	Mail    string `json:"mail"`
+	Balance int    `json:"balance"`
 }
